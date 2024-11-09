@@ -170,12 +170,10 @@ class Material
         
         foreach ($this->usedSections as $section) {
             list($start, $end) = $section;
-            $space = $start - $lastEnd;
-            $maxSpace = max($maxSpace, $space);
+            $maxSpace = max($maxSpace, $start - $lastEnd);
             $lastEnd = $end;
         }
         
-        $maxSpace = max($maxSpace, $this->length - $lastEnd);
-        return $maxSpace;
+        return max($maxSpace, $this->length - $lastEnd);
     }
 }
