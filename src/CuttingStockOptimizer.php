@@ -408,64 +408,6 @@ class CuttingStockOptimizer
                 ) === false) {
                     throw new Exception("绘制详细信息失败");
                 }
-
-                // 绘制边距标签
-                // 左边距标签
-                $leftLabelX = (int)round($xStart + (($leftMarginX - $xStart) / 2) - 10);
-                if (imagettftext(
-                    $image,
-                    10,
-                    0,
-                    $leftLabelX,
-                    (int)round($y + 15),
-                    $black,
-                    $fontRegular,
-                    sprintf("%.1f", $product->getLeftMargin())
-                ) === false) {
-                    throw new Exception("绘制左边距标签失败");
-                }
-
-                // 右边距标签
-                $rightLabelX = (int)round($rightMarginX + (($xEnd - $rightMarginX) / 2) - 10);
-                if (imagettftext(
-                    $image,
-                    10,
-                    0,
-                    $rightLabelX,
-                    (int)round($y + 15),
-                    $black,
-                    $fontRegular,
-                    sprintf("%.1f", $product->getRightMargin())
-                ) === false) {
-                    throw new Exception("绘制右边距标签失败");
-                }
-
-                // 在横线上方标注边距值
-                if (imagettftext(
-                    $image,
-                    10,
-                    0,
-                    (int)round($xStart + (($leftMarginX - $xStart) / 2) - 10),
-                    (int)round($y + 15),
-                    $black,
-                    $fontRegular,
-                    sprintf("%.1f", $product->getLeftMargin())
-                ) === false) {
-                    throw new Exception("绘制左边距值失败");
-                }
-
-                if (imagettftext(
-                    $image,
-                    10,
-                    0,
-                    (int)round($rightMarginX + (($xEnd - $rightMarginX) / 2) - 10),
-                    (int)round($y + 15),
-                    $black,
-                    $fontRegular,
-                    sprintf("%.1f", $product->getRightMargin())
-                ) === false) {
-                    throw new Exception("绘制右边距值失败");
-                }
             }
         }
 
