@@ -1,12 +1,28 @@
 <?php
+
 namespace CuttingStock;
 
-class CuttingStockOptimizer {
-    protected $products = [];
-    protected $remaining = [];
-    protected $materials = [];
+use Exception;
 
-    public function __construct(array $products) {
+class CuttingStockOptimizer
+{
+    /** @var array<string, Product> */
+    protected array $products = [];
+    
+    /** @var array<string, int> */
+    protected array $remaining = [];
+    
+    /** @var array<Material> */
+    protected array $materials = [];
+    
+    /** @var array<string, array> */
+    protected array $validPositionsCache = [];
+    
+    /** @var array<string, float> */
+    protected array $scoreCache = [];
+
+    public function __construct(array $products)
+    {
         foreach ($products as $i => $productData) {
             list($holes, $leftMargin, $rightMargin, $quantity) = $productData;
             $product = new Product(
@@ -25,8 +41,17 @@ class CuttingStockOptimizer {
 
     /**
      * 找出产品所有可能的切割位置，完全匹配 Python 版本的逻辑
+     * 
+     * @return array<array{0: float, 1: float, 2: array}>
      */
-    protected function findValidPositions(Product $product) {
+    protected function findValidPositions(Product $product): array
+    {
+        $cacheKey = $product->getId();
+
+        if (isset($this->validPositionsCache[$cacheKey])) {
+            return $this->validPositionsCache[$cacheKey];
+        }
+
         $validPositions = [];
         $holesNeeded = $product->getHolesCount();
 
@@ -43,44 +68,59 @@ class CuttingStockOptimizer {
             }
         }
 
-        return $validPositions;  // 返回所有可能的位置
+        $this->validPositionsCache[$cacheKey] = $validPositions;
+        return $validPositions;
     }
 
     /**
      * 评估切割位置的得分，对齐 Python 版本的评分标准
      */
-    protected function evaluateCutPosition($startPos, $endPos, array $holes, Product $product, Material $material) {
+    protected function evaluateCutPosition(float $startPos, float $endPos, array $holes, Material $material): float
+    {
         $score = 0;
         $length = $endPos - $startPos;
 
-        // 1. 材料利用率
-        $usedLength = array_reduce($material->getUsedSections(), function($sum, $section) {
+        // 1. 材料利用率评分优化
+        $usedLength = array_reduce($material->getUsedSections(), function ($sum, $section) {
             list($start, $end) = $section;
             return $sum + ($end - $start);
         }, 0);
         $materialUtilization = ($usedLength + $length) / Config::STOCK_LENGTH;
-        $score += $materialUtilization * 15;
+        $score += $materialUtilization * 20;
 
-        // 2. 切割连续性
+        // 2. 切割连续性评分优化
         foreach ($material->getUsedSections() as $section) {
             list($usedStart, $usedEnd) = $section;
-            if (abs($startPos - $usedEnd) < 0.1 || abs($endPos - $usedStart) < 0.1) {
-                $score += 5;
+            if (abs($startPos - $usedEnd) < 0.1) {
+                $score += 8;
+            }
+            if (abs($endPos - $usedStart) < 0.1) {
+                $score += 8;
             }
         }
 
-        // 3. 边缘优化
-        if ($startPos < 0.1 || abs($endPos - Config::STOCK_LENGTH) < 0.1) {
-            $score += 3;
+        // 3. 边缘优化加强
+        if ($startPos < 0.1) {
+            $score += 5;
         }
+        if (abs($endPos - Config::STOCK_LENGTH) < 0.1) {
+            $score += 5;
+        }
+
+        // 4. 添加新的评分因素：孔位密度
+        $holeDensity = count($holes) / $length;
+        $score += $holeDensity * 10;
 
         return $score;
     }
 
     /**
      * 选择最优的产品切割顺序
+     * 
+     * @return array<array{id: string, score: float}>
      */
-    protected function selectBestProductSequence() {
+    protected function selectBestProductSequence(): array
+    {
         $sequence = [];
         foreach ($this->remaining as $productId => $quantity) {
             if ($quantity <= 0) {
@@ -93,10 +133,11 @@ class CuttingStockOptimizer {
             $marginRatio = ($product->getLeftMargin() + $product->getRightMargin()) / $length;
 
             $score = (
-                $length * 2 +
-                $holesDensity * 10 +
-                (1 - $marginRatio) * 5 +
-                $quantity * 3
+                $length * 2.5 +
+                $holesDensity * 15 +
+                (1 - $marginRatio) * 8 +
+                $quantity * 4 +
+                ($length / Config::STOCK_LENGTH) * 10
             );
 
             $sequence[] = [
@@ -105,7 +146,7 @@ class CuttingStockOptimizer {
             ];
         }
 
-        usort($sequence, function($a, $b) {
+        usort($sequence, function ($a, $b) {
             return $b['score'] <=> $a['score'];
         });
 
@@ -113,67 +154,9 @@ class CuttingStockOptimizer {
     }
 
     /**
-     * 执行优化切割
-     */
-    public function optimize() {
-        while (true) {
-            if (array_sum($this->remaining) <= 0) {
-                break;
-            }
-
-            // 获取当前最优的产品切割顺序
-            $bestProducts = $this->selectBestProductSequence();
-            $cutMade = false;
-            $bestCut = null;
-            $bestScore = PHP_FLOAT_MIN;
-
-            // 对每个候选产品尝试所有可能的切割位置
-            foreach ($bestProducts as $productInfo) {
-                $productId = $productInfo['id'];
-                $product = $this->products[$productId];
-                $validPositions = $this->findValidPositions($product);
-
-                foreach ($validPositions as $position) {
-                    list($startPos, $endPos, $holes) = $position;
-
-                    // 评估这个切割位置的得分
-                    $score = $this->evaluateCutPosition(
-                        $startPos,
-                        $endPos,
-                        $holes,
-                        $product,
-                        end($this->materials)
-                    );
-
-                    if ($score > $bestScore) {
-                        $bestScore = $score;
-                        $bestCut = [$productId, $startPos, $endPos, $holes];
-                    }
-                }
-            }
-
-            // 执行最优的切割
-            if ($bestCut !== null) {
-                list($productId, $startPos, $endPos, $holes) = $bestCut;
-                $currentMaterial = end($this->materials);
-                $currentMaterial->cut($startPos, $endPos, $productId);
-                $this->remaining[$productId]--;
-                $cutMade = true;
-            }
-
-            // 如果找不到可行的切割，添加新材料
-            if (!$cutMade) {
-                $this->materials[] = new Material();
-            }
-        }
-
-        return $this->materials;
-    }
-
-    /**
      * 检查是否还有未切割的产品
      */
-    protected function hasRemainingProducts()
+    protected function hasRemainingProducts(): bool
     {
         foreach ($this->remaining as $quantity) {
             if ($quantity > 0) {
@@ -185,11 +168,13 @@ class CuttingStockOptimizer {
 
     /**
      * 分析优化结果
+     * 
+     * @return array{theoretical_min_materials: float, actual_materials: int, utilization_rate: float}
      */
-    public function analyzeResult()
+    public function analyzeResult(): array
     {
         $totalProductLength = 0;
-        foreach ($this->products as $productId => $product) {
+        foreach ($this->products as $product) {
             $totalProductLength += $product->calculateLength() * $product->getQuantity();
         }
 
@@ -212,12 +197,15 @@ class CuttingStockOptimizer {
 
     /**
      * 带可视化的优化过程
+     *
+     * @throws Exception
      */
-    public function optimizeWithVisualization() {
+    public function optimizeWithVisualization(): void
+    {
         $step = 1;
 
         while ($this->hasRemainingProducts()) {
-            echo "\n步骤 {$step}:\n";
+            echo "\n步骤 $step:\n";
             echo "当前剩余需求:\n";
 
             foreach ($this->remaining as $productId => $quantity) {
@@ -238,41 +226,41 @@ class CuttingStockOptimizer {
             $cutMade = false;
             $bestCut = null;
             $bestScore = PHP_FLOAT_MIN;
+            $currentMaterial = end($this->materials);
 
-            // 对每个候选产品尝试所有可能的切割位置
             foreach ($bestProducts as $productInfo) {
                 $productId = $productInfo['id'];
                 $product = $this->products[$productId];
                 $validPositions = $this->findValidPositions($product);
 
                 foreach ($validPositions as $position) {
-                    list($startPos, $endPos, $holes) = $position;
+                    list($startPos, $endPos, $selectedHoles) = $position;
 
-                    // 评估这个切割位置的得分
+                    if (!$currentMaterial->canCut($startPos, $endPos)) {
+                        continue;
+                    }
+
                     $score = $this->evaluateCutPosition(
                         $startPos,
                         $endPos,
-                        $holes,
-                        $product,
-                        end($this->materials)
+                        $selectedHoles,
+                        $currentMaterial
                     );
 
                     if ($score > $bestScore) {
                         $bestScore = $score;
-                        $bestCut = [$productId, $startPos, $endPos, $holes];
+                        $bestCut = [$productId, $startPos, $endPos, $selectedHoles];
                     }
                 }
             }
 
-            // 执行最优的切割
             if ($bestCut !== null) {
-                list($productId, $startPos, $endPos, $holes) = $bestCut;
-                $currentMaterial = end($this->materials);
-                $currentMaterial->cut($startPos, $endPos, $productId);  // 修正这里的参数传递
+                list($productId, $startPos, $endPos) = $bestCut;
+                $currentMaterial->cut($startPos, $endPos, $productId);
                 $this->remaining[$productId]--;
                 $cutMade = true;
 
-                echo sprintf(
+                printf(
                     "\n执行切割: 产品%s (%.1f - %.1f)\n",
                     $productId,
                     $startPos,
@@ -283,13 +271,22 @@ class CuttingStockOptimizer {
             if (!$cutMade) {
                 echo "\n开始使用新材料\n";
                 $this->materials[] = new Material();
+                $this->validPositionsCache = [];
+                $this->scoreCache = [];
             }
 
             $step++;
         }
     }
 
-    public function visualizeCuttingPlan($filename = 'cutting_plan.png')
+    /**
+     * 生成切割方案的可视化图像
+     * 
+     * @param string $filename 输出文件名
+     * @return bool
+     * @throws Exception
+     */
+    public function visualizeCuttingPlan(string $filename = 'cutting_plan.png'): bool
     {
         // 增加图像尺寸和边距
         $width = 1800;  // 加宽
@@ -302,7 +299,7 @@ class CuttingStockOptimizer {
 
         // 检查字体文件是否存在
         if (!file_exists($fontRegular) || !file_exists($fontBold)) {
-            throw new \Exception("Font files not found");
+            throw new Exception("字体文件未找到");
         }
 
         // 创建图像
@@ -311,7 +308,6 @@ class CuttingStockOptimizer {
         // 设置颜色
         $white = imagecolorallocate($image, 255, 255, 255);
         $black = imagecolorallocate($image, 0, 0, 0);
-        $gray = imagecolorallocate($image, 200, 200, 200);
         $lightGray = imagecolorallocate($image, 230, 230, 230);
         $transparentGray = imagecolorallocatealpha($image, 128, 128, 128, 80);
         $colors = [
@@ -406,7 +402,7 @@ class CuttingStockOptimizer {
             }
 
             // 绘制切割区域
-            foreach ($material->getUsedSections() as $sectionIndex => $section) {
+            foreach ($material->getUsedSections() as $section) {
                 list($start, $end, $productId) = $section;
                 $xStart = (int)round($margin + $start * $scale);
                 $xEnd = (int)round($margin + $end * $scale);

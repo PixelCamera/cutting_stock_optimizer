@@ -124,4 +124,58 @@ class Material
 
         return max($maxSpace, $this->length - $lastEnd);
     }
+
+    /**
+     * 添加预分配检查方法
+     *
+     * @param array $products 产品数组
+     * @return bool 是否可以预分配
+     */
+    public function canPreallocate(array $products): bool
+    {
+        $totalLength = 0;
+        foreach ($products as $product) {
+            $totalLength += $product->calculateLength();
+        }
+        
+        return $totalLength <= ($this->length - $this->getUsedLength());
+    }
+
+    /**
+     * 获取已使用长度
+     *
+     * @return float 已使用长度
+     */
+    public function getUsedLength(): float
+    {
+        return array_reduce($this->usedSections, function($sum, $section) {
+            list($start, $end) = $section;
+            return $sum + ($end - $start);
+        }, 0.0);
+    }
+
+    /**
+     * 获取最大连续可用空间
+     *
+     * @return float 最大连续可用空间
+     */
+    public function getMaxContinuousSpace(): float
+    {
+        if (empty($this->usedSections)) {
+            return $this->length;
+        }
+        
+        $maxSpace = 0;
+        $lastEnd = 0;
+        
+        foreach ($this->usedSections as $section) {
+            list($start, $end) = $section;
+            $space = $start - $lastEnd;
+            $maxSpace = max($maxSpace, $space);
+            $lastEnd = $end;
+        }
+        
+        $maxSpace = max($maxSpace, $this->length - $lastEnd);
+        return $maxSpace;
+    }
 }
