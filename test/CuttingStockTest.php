@@ -1,4 +1,5 @@
 <?php
+
 namespace CuttingStock\Test;
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -6,26 +7,28 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use CuttingStock\CuttingStockOptimizer;
 use Exception;
 
-class CuttingStockTest {
+/**
+ * 切割优化测试类
+ * 用于测试切割优化算法的功能和性能
+ *
+ * @package CuttingStock\Test
+ */
+class CuttingStockTest
+{
     /**
      * 运行切割优化测试
      * @throws Exception
      */
-    public function run(): void 
+    public function run(): void
     {
         // 定义产品需求
         $products = [
             // [孔数, 左边距, 右边距, 数量]
-            [1, 2, 2, 15],    // P1: 简单的单孔产品
-            [2, 3, 3, 25],    // P2: 标准双孔产品
-            [3, 4, 4, 10],    // P3: 三孔产品
-            [4, 5, 5, 8],     // P4: 四孔产品
-            [2, 6, 4, 12],    // P5: 不对称边距的双孔产品
-            [3, 3, 6, 18],    // P6: 不对称边距的三孔产品
-            [1, 4, 4, 30],    // P7: 大边距单孔产品，大量需求
-            [4, 3, 3, 5],     // P8: 紧凑型四孔产品
-            [2, 5, 5, 20],    // P9: 大边距双孔产品
-            [3, 2, 2, 15],    // P10: 紧凑型三孔产品
+            [8, 38, 38, 2],    // 8 孔 636
+            [7, 20, 36, 9],    // 7 孔 536
+            [3, 20, 20, 2],    // 3 孔 200
+            [5, 20, 20, 2],    // 5 孔 200
+            [8, 20, 20, 5],    // 8 孔 600
         ];
 
         try {
@@ -56,9 +59,14 @@ class CuttingStockTest {
             // 获取并显示分析结果
             $analysis = $optimizer->analyzeResult();
             echo "\n优化结果分析:\n";
-            echo sprintf("理论最小材料数: %.2f根\n", $analysis['theoretical_min_materials']);
-            echo sprintf("实际使用材料数: %d根\n", $analysis['actual_materials']);
-            echo sprintf("总体材料利用率: %.1f%%\n", $analysis['utilization_rate']);
+
+            foreach ($analysis as $toolType => $result) {
+                $toolName = $toolType === 'normal_blade' ? "普通刀片(3mm)" : "线切割(0.3mm)";
+                echo "\n{$toolName}:\n";
+                echo sprintf("理论最小材料数: %.2f根\n", $result['theoretical_min_materials']);
+                echo sprintf("实际使用材料数: %d根\n", $result['actual_materials']);
+                echo sprintf("总体材料利用率: %.1f%%\n", $result['utilization_rate']);
+            }
         } catch (Exception $e) {
             echo "错误: " . $e->getMessage() . "\n";
             throw $e;
