@@ -4,7 +4,6 @@ namespace CuttingStock;
 
 /**
  * 产品类
- * 用于表示需要切割的产品，包含孔数、边距等信息
  */
 class Product
 {
@@ -89,14 +88,27 @@ class Product
 
     /**
      * 计算产品总长度
-     * 包括左右边距和孔位之间的间距
+     * 
+     * @return float 产品总长度(mm)
      */
     public function calculateLength(): float
     {
-        if ($this->holesCount === 1) {
-            return $this->leftMargin + $this->rightMargin;
-        }
         return $this->leftMargin + $this->rightMargin +
             ($this->holesCount - 1) * Config::HOLE_SPACING;
+    }
+
+    /**
+     * 获取产品的尺寸信息
+     */
+    public function getDimensionInfo(): string
+    {
+        return sprintf(
+            "%d孔 L=%.1fmm (左边距%.1f + %d孔间距 + 右边距%.1f)",
+            $this->holesCount,
+            $this->calculateLength(),
+            $this->leftMargin,
+            $this->holesCount - 1,
+            $this->rightMargin
+        );
     }
 }
