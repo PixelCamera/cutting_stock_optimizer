@@ -6,24 +6,31 @@ use RuntimeException;
 
 /**
  * 材料类
- * 用于表示和管理单根材料的切割情况
  */
 class Material
 {
     /** @var float 材料总长度 */
     protected float $length;
 
-    /** @var array 已使用的切割区间 [[start, end, productId], ...] */
+    /** @var array 已使用的切割区间 [[start, end, productId, toolType], ...] */
     protected array $usedSections;
 
-    public function __construct()
+    /** @var string 当前使用的切割工具类型 */
+    protected string $toolType;
+
+    /**
+     * @param string $toolType 切割工具类型 ('normal_blade' 或 'wire')
+     */
+    public function __construct(string $toolType = 'normal_blade')
     {
         $this->length = Config::STOCK_LENGTH;
         $this->usedSections = [];
+        $this->toolType = $toolType;
     }
 
     /**
      * 检查指定区间是否可以切割
+     * 考虑切割工具的宽度
      *
      * @param float $start 起始位置
      * @param float $end 结束位置
@@ -32,16 +39,20 @@ class Material
     public function canCut(float $start, float $end): bool
     {
         $epsilon = 0.0001;  // 浮点数比较容差
+        $toolWidth = Config::CUTTING_TOOLS[$this->toolType];
 
         // 检查是否超出材料长度
         if ($start < -$epsilon || $end > $this->length + $epsilon) {
             return false;
         }
 
-        // 检查是否与已有切割重叠
+        // 检查是否与已有切割重叠，需要考虑刀具宽度
         foreach ($this->usedSections as $section) {
             list($usedStart, $usedEnd) = $section;
-            if (!($end <= $usedStart + $epsilon || $start >= $usedEnd - $epsilon)) {
+            // 考虑刀具宽度的安全间距
+            $safeStart = $usedStart - $toolWidth;
+            $safeEnd = $usedEnd + $toolWidth;
+            if (!($end <= $safeStart + $epsilon || $start >= $safeEnd - $epsilon)) {
                 return false;
             }
         }
@@ -53,38 +64,53 @@ class Material
      *
      * @param float $start 起始位置
      * @param float $end 结束位置
-     * @param int $productId 产品ID
+     * @param string $productId 产品ID
      * @throws RuntimeException 当切割位置无效时抛出异常
      */
-    public function cut(float $start, float $end, int $productId): void
+    public function cut(float $start, float $end, string $productId): void
     {
         if (!$this->canCut($start, $end)) {
-            throw new RuntimeException(sprintf(
-                "无效的切割位置: 起点 %.2f, 终点 %.2f, 产品 %d",
-                $start,
-                $end,
-                $productId
-            ));
+            throw new RuntimeException("无效的切割位置");
         }
 
-        $this->usedSections[] = [$start, $end, $productId];
-        $this->sortSections();
+        $this->usedSections[] = [$start, $end, $productId, $this->toolType];
+        usort($this->usedSections, fn($a, $b) => $a[0] <=> $b[0]);
     }
 
     /**
-     * 对切割区间按起始位置排序
+     * 获取材料总长度
+     * 
+     * @return float 材料总长度(mm)
      */
-    protected function sortSections(): void
+    public function getLength(): float
     {
-        usort($this->usedSections, function ($a, $b) {
-            return $a[0] <=> $b[0];
-        });
+        return $this->length;
+    }
+
+    /**
+     * 获取当前使用的切割工具类型
+     * 
+     * @return string 切割工具类型 ('normal_blade' 或 'wire')
+     */
+    public function getToolType(): string
+    {
+        return $this->toolType;
+    }
+
+    /**
+     * 获取切割工具宽度
+     * 
+     * @return float 切割工具宽度(mm)
+     */
+    public function getToolWidth(): float
+    {
+        return Config::CUTTING_TOOLS[$this->toolType];
     }
 
     /**
      * 获取已使用的切割区间
      *
-     * @return array 切割区间数组 [[start, end, productId], ...]
+     * @return array 切割区间数组 [[start, end, productId, toolType], ...]
      */
     public function getUsedSections(): array
     {
@@ -98,82 +124,10 @@ class Material
      */
     public function getUtilizationRate(): float
     {
-        $usedLength = 0;
-        foreach ($this->usedSections as $section) {
-            list($start, $end) = $section;
-            $usedLength += ($end - $start);
-        }
+        $usedLength = array_sum(array_map(
+            fn($section) => $section[1] - $section[0], 
+            $this->usedSections
+        ));
         return $usedLength / $this->length;
-    }
-
-    /**
-     * 获取最大剩余空间长度
-     *
-     * @return float 最大剩余空间长度
-     */
-    public function getMaxRemainingSpace(): float
-    {
-        $maxSpace = 0;
-        $lastEnd = 0;
-
-        foreach ($this->usedSections as $section) {
-            list($start, $end) = $section;
-            $maxSpace = max($maxSpace, $start - $lastEnd);
-            $lastEnd = $end;
-        }
-
-        return max($maxSpace, $this->length - $lastEnd);
-    }
-
-    /**
-     * 添加预分配检查方法
-     *
-     * @param array $products 产品数组
-     * @return bool 是否可以预分配
-     */
-    public function canPreallocate(array $products): bool
-    {
-        $totalLength = 0;
-        foreach ($products as $product) {
-            $totalLength += $product->calculateLength();
-        }
-        
-        return $totalLength <= ($this->length - $this->getUsedLength());
-    }
-
-    /**
-     * 获取已使用长度
-     *
-     * @return float 已使用长度
-     */
-    public function getUsedLength(): float
-    {
-        return array_reduce($this->usedSections, function($sum, $section) {
-            list($start, $end) = $section;
-            return $sum + ($end - $start);
-        }, 0.0);
-    }
-
-    /**
-     * 获取最大连续可用空间
-     *
-     * @return float 最大连续可用空间
-     */
-    public function getMaxContinuousSpace(): float
-    {
-        if (empty($this->usedSections)) {
-            return $this->length;
-        }
-        
-        $maxSpace = 0;
-        $lastEnd = 0;
-        
-        foreach ($this->usedSections as $section) {
-            list($start, $end) = $section;
-            $maxSpace = max($maxSpace, $start - $lastEnd);
-            $lastEnd = $end;
-        }
-        
-        return max($maxSpace, $this->length - $lastEnd);
     }
 }
